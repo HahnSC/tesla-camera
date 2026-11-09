@@ -16,6 +16,7 @@ import { readTextFile, readDir, type DirEntry } from '@tauri-apps/plugin-fs'
 
 interface FsSystemProps {
   onAccess: (accessFile: OriginVideo[]) => void
+  onError: (message: string) => void
 }
 
 function nameToTime(name: string): number {
@@ -33,7 +34,7 @@ function nameToTitle(name: string): string {
 
 function pathToType(path: string) {
   if (path.includes('SavedClips')) {
-    return TypeEnum.事件
+    return TypeEnum.保存
   }
   if (path.includes('RecentClips')) {
     return TypeEnum.行车记录仪
@@ -46,7 +47,15 @@ function pathToType(path: string) {
 
 async function getDirFiles(dir: string): Promise<TauriFile[]> {
   const result: TauriFile[] = []
-  const entries: DirEntry[] = await readDir(dir)
+  let entries: DirEntry[]
+  try {
+    entries = await readDir(dir)
+  } catch (error) {
+    if (dir.endsWith('TeslaCam') || dir.endsWith('TeslaCam/')) {
+      throw error
+    }
+    return result
+  }
   for (const entry of entries) {
     const path = `${dir}/${entry.name}`
     if (entry.isDirectory) {
@@ -67,15 +76,18 @@ function convertVideoFiles(videoFiles: TauriFile[]): OriginVideo[] {
       return
     }
     const timeName = name.slice(0, 19)
-    let exists = videos[timeName]
+    const folder = path.slice(0, path.length - name.length)
+    const id = `${folder}${timeName}`
+    let exists = videos[id]
     if (!exists) {
       exists = {
+        id,
         title: nameToTitle(timeName),
         time: nameToTime(timeName),
         type: pathToType(path),
-        dir: path.replace(name, ''),
+        dir: folder,
       }
-      videos[timeName] = exists
+      videos[id] = exists
     }
     const fs: FileData = {
       async get() {
@@ -98,6 +110,12 @@ function convertVideoFiles(videoFiles: TauriFile[]): OriginVideo[] {
     }
     if (name.includes('left_repeater')) {
       exists.src_l = fs
+    }
+    if (name.includes('left_pillar') || name.includes('left-pillar')) {
+      exists.src_lp = fs
+    }
+    if (name.includes('right_pillar') || name.includes('right-pillar')) {
+      exists.src_rp = fs
     }
   })
   return Object.values(videos) as OriginVideo[]
@@ -134,6 +152,8 @@ const FsSystem: React.FC<FsSystemProps> = props => {
         }
       })
       props.onAccess(newVideos)
+    }).catch(error => {
+      props.onError(error instanceof Error ? error.message : String(error))
     })
   }
   return (

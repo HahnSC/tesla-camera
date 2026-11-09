@@ -27,10 +27,10 @@ interface FfmpegTerminalProps {
   video?: Video
 }
 
-type CameraType = 'f' | 'b' | 'l' | 'r'
+type CameraType = 'f' | 'b' | 'l' | 'r' | 'lp' | 'rp'
 
 function isCameraType(value: string): value is CameraType {
-  return ['f', 'b', 'l', 'r'].includes(value)
+  return ['f', 'b', 'l', 'r', 'lp', 'rp'].includes(value)
 }
 
 const FfmpegTerminal: React.FC<FfmpegTerminalProps> = (props) => {
@@ -50,6 +50,10 @@ const FfmpegTerminal: React.FC<FfmpegTerminalProps> = (props) => {
         return props.video?.src_r_name
       case 'b':
         return props.video?.src_b_name
+      case 'lp':
+        return props.video?.src_lp_name
+      case 'rp':
+        return props.video?.src_rp_name
       default:
         return props.video?.src_f_name
     }
@@ -104,6 +108,8 @@ const FfmpegTerminal: React.FC<FfmpegTerminalProps> = (props) => {
                 <Radio label="后" value="b" />
                 <Radio label="左" value="l" />
                 <Radio label="右" value="r" />
+                {props.video.src_lp_name ? <Radio label="左柱" value="lp" /> : null}
+                {props.video.src_rp_name ? <Radio label="右柱" value="rp" /> : null}
               </RadioGroup>
             </Field>
             <Field label="原始文件根目录">

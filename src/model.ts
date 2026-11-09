@@ -2,14 +2,17 @@ export enum TypeEnum {
   '所有',
   '事件',
   '哨兵',
-  '行车记录仪'
+  '行车记录仪',
+  '保存'
 }
 
 export enum CameraEnum {
   '前',
   '后',
   '左',
-  '右'
+  '右',
+  '左柱',
+  '右柱'
 }
 
 export enum ExportStatusEnum {
@@ -35,6 +38,7 @@ export interface FileData {
 }
 
 export interface OriginVideo {
+  id: string
   title: string
   time: number
   type: TypeEnum
@@ -43,6 +47,8 @@ export interface OriginVideo {
   src_b: FileData
   src_r: FileData
   src_l: FileData
+  src_lp?: FileData
+  src_rp?: FileData
   event?: number
 }
 
@@ -54,9 +60,12 @@ export interface OriginFSVideo {
   src_b: string
   src_r: string
   src_l: string
+  src_lp?: string
+  src_rp?: string
 }
 
 export interface Video {
+  id: string
   title: string
   time: number
   type: TypeEnum
@@ -69,10 +78,16 @@ export interface Video {
   src_r_name: string
   src_l: string
   src_l_name: string
+  src_lp?: string
+  src_lp_name?: string
+  src_rp?: string
+  src_rp_name?: string
   src_f_path: string
   src_b_path: string
   src_r_path: string
   src_l_path: string
+  src_lp_path?: string
+  src_rp_path?: string
 }
 
 export interface ModelState {

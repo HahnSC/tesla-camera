@@ -31,7 +31,7 @@ async function getDirFiles(fs: FileSystemDirectoryHandle, path = '') {
 
 function pathToType(path: string) {
   if (path.includes('SavedClips')) {
-    return TypeEnum.事件
+    return TypeEnum.保存
   }
   if (path.includes('RecentClips')) {
     return TypeEnum.行车记录仪
@@ -63,15 +63,18 @@ function convertFiles(videoFiles: VideoFile[]): OriginVideo[] {
       return
     }
     const name = fs.name.slice(0, 19)
-    let exists = videos[name]
+    const folder = path.slice(0, path.length - fs.name.length)
+    const id = `${folder}${name}`
+    let exists = videos[id]
     if (!exists) {
       exists = {
+        id,
         title: nameToTitle(name),
         time: nameToTime(name),
         type: pathToType(path),
         dir,
       }
-      videos[name] = exists
+      videos[id] = exists
     }
     const fsData: FileData = {
       async get() {
@@ -94,6 +97,12 @@ function convertFiles(videoFiles: VideoFile[]): OriginVideo[] {
     }
     if (fs.name.includes('left_repeater')) {
       exists.src_l = fsData
+    }
+    if (fs.name.includes('left_pillar') || fs.name.includes('left-pillar')) {
+      exists.src_lp = fsData
+    }
+    if (fs.name.includes('right_pillar') || fs.name.includes('right-pillar')) {
+      exists.src_rp = fsData
     }
   })
   return Object.values(videos) as OriginVideo[]

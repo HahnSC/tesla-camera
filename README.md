@@ -7,17 +7,17 @@
 </p>
 
 <p align="center">
-<a href="https://github.com/Mario34/tesla-camera/releases" target="_blank">
+<a href="https://github.com/HahnSC/tesla-camera/releases" target="_blank">
 <img alt="macOS" src="https://img.shields.io/badge/-macOS-gray?style=flat&logo=apple&logoColor=white" />
 </a>
-<a href="https://github.com/Mario34/tesla-camera/releases" target="_blank">
+<a href="https://github.com/HahnSC/tesla-camera/releases" target="_blank">
 <img alt="Windows" src="https://img.shields.io/badge/-Windows-blue?style=flat&logo=windows10&logoColor=white" />
 </a>
 <a href="https://mario34.github.io/tesla-camera" target="_blank">
 <img alt="Windows" src="https://img.shields.io/badge/Chrome-86+-green?style=flat&logo=googlechrome&logoColor=white" />
 </a>
-<a href="https://github.com/Mario34/tesla-camera/releases" target="_blank">
-<img alt="Downloads" src="https://img.shields.io/github/downloads/Mario34/tesla-camera/total.svg?style=flat" />
+<a href="https://github.com/HahnSC/tesla-camera/releases" target="_blank">
+<img alt="Downloads" src="https://img.shields.io/github/downloads/HahnSC/tesla-camera/total.svg?style=flat" />
 </a>
 </p>
 
@@ -32,7 +32,7 @@
 
 ## 安装
 
-访问 [Github Releases](https://github.com/Mario34/tesla-camera/releases) 下载对应的包，各个平台对应包名称对应关系如下
+访问 [Github Releases](https://github.com/HahnSC/tesla-camera/releases) 下载对应的包，各个平台对应包名称对应关系如下
 
 - Windows: \*_x64-setup.exe、\*_x64_en-US.msi
 - MacOS: \*_x64.dmg、\*_x64.app.tar.gz

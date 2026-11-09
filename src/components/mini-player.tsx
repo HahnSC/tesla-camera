@@ -37,6 +37,16 @@ const useStyles = makeStyles({
       bottom: '30px',
       right: '30px',
     },
+    '&.c4': {
+      top: '50%',
+      left: '30px',
+      transform: 'translateY(-50%)',
+    },
+    '&.c5': {
+      top: '50%',
+      right: '30px',
+      transform: 'translateY(-50%)',
+    },
   },
   video: {
     height: '100%',
@@ -66,6 +76,15 @@ const MiniPlay: React.FC<MiniPlayProps> = (props) => {
   const styles = useStyles()
   const videoRef = useRef<HTMLVideoElement>(null)
   const playTimerRef = useRef<number | null>(null)
+  useEffect(() => {
+    const video = videoRef.current
+    return () => {
+      if (!video) return
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    }
+  }, [])
   useEffect(() => {
     if (!videoRef.current) return
     if (paused && !videoRef.current.paused) {
@@ -97,11 +116,10 @@ const MiniPlay: React.FC<MiniPlayProps> = (props) => {
       <video
         muted
         className={cls(styles.video, { 'is-hidden': isActive })}
+        preload="auto"
         ref={videoRef}
         src={src}
-      >
-        <source src={src} type="video/mp4" />
-      </video>
+      />
     </div>
   )
 }

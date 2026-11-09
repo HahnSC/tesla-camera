@@ -9,6 +9,16 @@
     "core:default",
     "dialog:default",
     "fs:default",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$HOME/**",
+        "/Volumes/**"
+      ]
+    },
     "notification:default",
     "shell:default",
     "updater:default"

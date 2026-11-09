@@ -20,7 +20,7 @@ import DirectoryAccess from './components/directory-access'
 import FfmpegTerminal from './components/ffmpeg-terminal'
 import FfmpegExport from './components/ffmpeg-export'
 import FsSystem from './components/fs-system'
-import CheckUpdate from './components/check-update'
+import { isTauri } from '@tauri-apps/api/core'
 import { TypeEnum, type ModelState, type OriginVideo } from './model'
 
 const useStyles = makeStyles({
@@ -78,6 +78,9 @@ const useStyles = makeStyles({
       color: tokens.colorPaletteRedBorderActive,
     },
   },
+  menuItemIsSelected: {
+    backgroundColor: tokens.colorBrandBackground2,
+  },
   content: {
     height: '100vh',
     ...shorthands.overflow('hidden', 'auto'),
@@ -113,14 +116,38 @@ const useStyles = makeStyles({
   },
 })
 
+function CameraLayoutIcon({ six }: { six: boolean }) {
+  const tiles = six
+    ? [[4.5, 3], [13.5, 3], [4.5, 9.5], [13.5, 9.5], [4.5, 16], [13.5, 16]]
+    : [[3.5, 3.5], [13, 3.5], [3.5, 13], [13, 13]]
+  const size = six ? 6 : 7.5
+  return (
+    <svg aria-hidden="true" height="24" viewBox="0 0 24 24" width="24">
+      {tiles.map(([x, y]) => (
+        <rect
+          key={`${x}-${y}`}
+          fill="none"
+          height={size}
+          rx="1.2"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          width={size}
+          x={x}
+          y={y}
+        />
+      ))}
+    </svg>
+  )
+}
+
 const tabs = [
   {
     name: '所有',
     value: TypeEnum.所有,
   },
   {
-    name: '事件',
-    value: TypeEnum.事件,
+    name: '保存',
+    value: TypeEnum.保存,
   },
   {
     name: '哨兵',
@@ -135,11 +162,65 @@ const tabs = [
 function App() {
   const styles = useStyles()
   const [filterType, setFilterType] = useState(TypeEnum.所有)
+  const [scanError, setScanError] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [sixCamera, setSixCamera] = useState(false)
   const [state, setState] = useState<ModelState>({
     type: TypeEnum.所有,
     list: [],
     events: [],
   })
+  useEffect(() => {
+    const current = state.current
+    if (!current) return
+    if (!sixCamera) {
+      if (!current.src_lp && !current.src_rp) return
+      if (current.src_lp) URL.revokeObjectURL(current.src_lp)
+      if (current.src_rp) URL.revokeObjectURL(current.src_rp)
+      setState(prev => prev.current ? {
+        ...prev,
+        current: {
+          ...prev.current,
+          src_lp: undefined,
+          src_lp_name: undefined,
+          src_lp_path: undefined,
+          src_rp: undefined,
+          src_rp_name: undefined,
+          src_rp_path: undefined,
+        },
+      } : prev)
+      return
+    }
+    if (current.src_lp || current.src_rp) return
+    const origin = state.list.find(item => item.id === current.id)
+    if (!origin?.src_lp && !origin?.src_rp) return
+    let alive = true
+    Promise.all([origin.src_lp?.get(), origin.src_rp?.get()]).then(([left, right]) => {
+      if (!alive) {
+        if (left?.url) URL.revokeObjectURL(left.url)
+        if (right?.url) URL.revokeObjectURL(right.url)
+        return
+      }
+      setState(prev => {
+        if (!prev.current || prev.current.id !== current.id) return prev
+        return {
+          ...prev,
+          current: {
+            ...prev.current,
+            src_lp: left?.url,
+            src_lp_name: left?.name,
+            src_lp_path: origin.src_lp?.path,
+            src_rp: right?.url,
+            src_rp_name: right?.name,
+            src_rp_path: origin.src_rp?.path,
+          },
+        }
+      })
+    })
+    return () => {
+      alive = false
+    }
+  }, [sixCamera, state.current?.id])
   useEffect(() => {
     document.onkeydown = (e: KeyboardEvent) => {
       if (e.code == 'Space') {
@@ -151,34 +232,50 @@ function App() {
     }
   }, [])
   function onFileSystemAccess(videos: OriginVideo[]) {
+    setScanError('')
+    setSelectedIds([])
     setState({
       ...state,
       list: videos,
     })
   }
-  async function onSelectVideo(value: number) {
+  function onItemClick(event: React.MouseEvent, id: string) {
+    if (event.metaKey || event.altKey) {
+      setSelectedIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
+      return
+    }
+    setSelectedIds([id])
+    onSelectVideo(id)
+  }
+  async function onSelectVideo(id: string) {
     if (state.current) {
       const {
-        src_f, src_b, src_l, src_r,
+        src_f, src_b, src_l, src_r, src_lp, src_rp,
       } = state.current
       URL.revokeObjectURL(src_f)
       URL.revokeObjectURL(src_b)
       URL.revokeObjectURL(src_l)
       URL.revokeObjectURL(src_r)
+      if (src_lp) URL.revokeObjectURL(src_lp)
+      if (src_rp) URL.revokeObjectURL(src_rp)
     }
-    const origin = state.list.find(({ time }) => time === value)
+    const origin = state.list.find(item => item.id === id)
     if (!origin) return
     const [
       src_f_file,
       src_b_file,
       src_l_file,
       src_r_file,
-    ] = [
-      await origin.src_f.get(),
-      await origin.src_b.get(),
-      await origin.src_l.get(),
-      await origin.src_r.get(),
-    ]
+      src_lp_file,
+      src_rp_file,
+    ] = await Promise.all([
+      origin.src_f.get(),
+      origin.src_b.get(),
+      origin.src_l.get(),
+      origin.src_r.get(),
+      sixCamera ? origin.src_lp?.get() : undefined,
+      sixCamera ? origin.src_rp?.get() : undefined,
+    ])
     setState({
       ...state,
       current: {
@@ -195,12 +292,21 @@ function App() {
         src_r: src_r_file.url,
         src_r_name: src_r_file.name,
         src_r_path: origin.src_r.path,
+        src_lp: src_lp_file?.url,
+        src_lp_name: src_lp_file?.name,
+        src_lp_path: src_lp_file ? origin.src_lp?.path : undefined,
+        src_rp: src_rp_file?.url,
+        src_rp_name: src_rp_file?.name,
+        src_rp_path: src_rp_file ? origin.src_rp?.path : undefined,
       },
     })
   }
   const videoList = state.list
     .filter(({ type }) => type === filterType || filterType === TypeEnum.所有)
     .sort((a, b) => b.time - a.time)
+  const selectedVideos = state.list
+    .filter(item => selectedIds.includes(item.id))
+    .sort((a, b) => a.time - b.time)
   return (
     <>
       <div className={styles.root}>
@@ -224,9 +330,12 @@ function App() {
             {
               videoList.map((item) => (
                 <div
-                  className={cln(styles.menuItem, { [styles.menuItemIsActive]: item.time === state.current?.time })}
-                  key={item.time}
-                  onClick={() => onSelectVideo(item.time)}
+                  className={cln(styles.menuItem, {
+                    [styles.menuItemIsActive]: item.id === state.current?.id,
+                    [styles.menuItemIsSelected]: selectedIds.includes(item.id),
+                  })}
+                  key={item.id}
+                  onClick={event => onItemClick(event, item.id)}
                   onKeyDown={(e) => {
                     e.preventDefault()
                   }}
@@ -242,21 +351,26 @@ function App() {
                 </div>
               ))
             }
-            {!videoList.length && <div className={styles.empty}>暂无数据</div>}
+            {!videoList.length && <div className={styles.empty}>{scanError || '暂无数据'}</div>}
           </div>
         </div>
         <div className={styles.content}>
           <div className={styles.header}>
             <div className={styles.headerLeft}>
-              {window.__TAURI_IPC__
-                ? <FsSystem onAccess={onFileSystemAccess} />
+              {isTauri()
+                ? <FsSystem onAccess={onFileSystemAccess} onError={setScanError} />
                 : <DirectoryAccess onAccess={onFileSystemAccess} />}
-              {window.__TAURI_IPC__ && state.current
-                ? <FfmpegExport video={state.current} />
+              {isTauri() && selectedVideos.length
+                ? <FfmpegExport videos={selectedVideos} />
                 : <FfmpegTerminal video={state.current} />}
             </div>
             <div className={styles.headerRight}>
-              <CheckUpdate />
+              <Tooltip content={sixCamera ? '切换为四路' : '切换为六路'} relationship="label">
+                <Button
+                  icon={<CameraLayoutIcon six={sixCamera} />}
+                  onClick={() => setSixCamera(value => !value)}
+                />
+              </Tooltip>
               <Tooltip
                 content={<>查看源代码 (本项目<Caption1Stronger>不会上传</Caption1Stronger>您的隐私视频，并且接受公开的代码审查)</>}
                 relationship="label"
@@ -291,7 +405,7 @@ function App() {
             </div>
           </div>
           <div className={styles.player}>
-            <Player key={state.current?.time} video={state.current} />
+            <Player key={state.current?.id} sixCamera={sixCamera} video={state.current} />
           </div>
         </div>
       </div>
