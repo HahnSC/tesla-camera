@@ -51,7 +51,7 @@ jobs:
       - name: Pnpm steup
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 11.5.2
     
       - name: Install frontend dependencies
         run: pnpm install
