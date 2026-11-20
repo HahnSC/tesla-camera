@@ -25,6 +25,7 @@ import {
 import { ResizeVideo24Filled } from '@fluentui/react-icons'
 import { type OriginVideo, type ExportTaskType, ExportStatusEnum } from '../model'
 import { loadDashcamSeiFile, type DashcamSample } from '../dashcam-sei'
+import { buildFfmpegArgs, overlayAssetNames, parseVideoSize } from '../export-overlay'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Command } from '@tauri-apps/plugin-shell'
 import { getName } from '@tauri-apps/api/app'
@@ -79,89 +80,7 @@ interface OverlayOptions {
   dashboard: boolean
 }
 
-interface Run {
-  t0: number
-  t1: number
-  sample: DashcamSample
-}
-
-const thinSamples = (samples: DashcamSample[]) => {
-  if (!samples.length) return []
-  const out = [samples[0]]
-  let next = samples[0].time + 0.2
-  for (const sample of samples) {
-    if (sample.time + 0.0001 < next) continue
-    out.push(sample)
-    next = sample.time + 0.2
-  }
-  const last = samples[samples.length - 1]
-  if (out[out.length - 1] !== last) out.push(last)
-  return out
-}
-
-const runsOf = (samples: DashcamSample[]): Run[] => {
-  const runs: Run[] = []
-  for (const sample of thinSamples(samples)) {
-    const prev = runs[runs.length - 1]
-    const changed = !prev
-      || prev.sample.gear !== sample.gear
-      || prev.sample.speedKmh !== sample.speedKmh
-      || prev.sample.brake !== sample.brake
-      || prev.sample.blinkerLeft !== sample.blinkerLeft
-      || prev.sample.blinkerRight !== sample.blinkerRight
-      || Math.abs(prev.sample.accelerator - sample.accelerator) >= 0.05
-      || Math.abs(prev.sample.steeringDeg - sample.steeringDeg) >= 6
-    if (!prev || changed) runs.push({ t0: sample.time, t1: sample.time, sample })
-    else prev.t1 = sample.time
-  }
-  for (let i = 0; i < runs.length - 1; i++) runs[i].t1 = runs[i + 1].t0
-  if (runs.length) {
-    const end = samples[samples.length - 1].time + 0.2
-    runs[runs.length - 1].t1 = Math.max(runs[runs.length - 1].t1, end)
-  }
-  return runs
-}
-
-const between = (t0: number, t1: number) => `between(t\\,${t0.toFixed(3)}\\,${t1.toFixed(3)})`
-
-const angleExpr = (runs: Run[]) => {
-  let expr = '0'
-  for (let i = runs.length - 1; i >= 0; i--) {
-    const rad = (runs[i].sample.steeringDeg * Math.PI / 180).toFixed(4)
-    expr = `if(lt(t\\,${runs[i].t1.toFixed(3)})\\,${rad}\\,${expr})`
-  }
-  return expr
-}
-
-const chainFilters = (file: ExportFile, samples: DashcamSample[], options: OverlayOptions) => {
-  const filters: string[] = []
-  if (options.timestamp) {
-    filters.push(`drawtext=fontsize=36:fontcolor=white:box=1:boxborderw=8:x=(w-text_w)/2:y=12:boxcolor=black@0.45:text='%{pts\\:localtime\\:${file.time / 1000}}'`)
-  }
-  if (!options.dashboard || !samples.length) return filters
-  const runs = runsOf(samples)
-  filters.push('drawbox=x=(iw-320)/2:y=56:w=320:h=96:color=white@0.35:t=fill')
-  filters.push('drawtext=text=\'KM/H\':fontsize=16:fontcolor=0x8d8d8d:x=(w-text_w)/2:y=118')
-  filters.push('drawtext=text=\'<\':fontsize=28:fontcolor=0x1a4a28:x=(w/2-150):y=78')
-  filters.push('drawtext=text=\'>\':fontsize=28:fontcolor=0x1a4a28:x=(w/2+130):y=78')
-  for (const run of runs) {
-    const enable = `enable='${between(run.t0, run.t1)}'`
-    filters.push(`drawtext=text='${run.sample.gear}':fontsize=32:fontcolor=black:x=(w/2-108):y=72:${enable}`)
-    filters.push(`drawtext=text='${run.sample.speedKmh}':fontsize=40:fontcolor=black:x=(w-text_w)/2:y=68:${enable}`)
-    const brake = run.sample.brake ? 'red' : '0xB0B0B0'
-    filters.push(`drawtext=text='●':fontsize=20:fontcolor=${brake}:x=(w/2-112):y=112:${enable}`)
-    const height = Math.max(4, Math.round(run.sample.accelerator * 22))
-    filters.push(`drawbox=x=(w/2+96):y=${128 - height}:w=14:h=${height}:color=0x5c5c5c:t=fill:${enable}`)
-    const flash = `enable='${between(run.t0, run.t1)}*lt(mod(t\\,1)\\,0.45)'`
-    if (run.sample.blinkerLeft) {
-      filters.push(`drawtext=text='<':fontsize=28:fontcolor=0x7dff6a:x=(w/2-150):y=78:${flash}`)
-    }
-    if (run.sample.blinkerRight) {
-      filters.push(`drawtext=text='>':fontsize=28:fontcolor=0x7dff6a:x=(w/2+130):y=78:${flash}`)
-    }
-  }
-  return filters
-}
+const ffmpegPath = (filePath: string) => filePath.replace(/\\/g, '/')
 
 const exportArgs = async (
   files: ExportFile[],
@@ -169,37 +88,38 @@ const exportArgs = async (
   fileName: string,
   options: OverlayOptions,
 ) => {
-  const output = `${exportDir}/${fileName}`
-  if (!options.timestamp && !options.dashboard) {
-    if (files.length === 1) return ['-y', '-i', files[0].path, '-c', 'copy', output]
-  }
   const samples = options.dashboard
     ? await Promise.all(files.map(file => loadDashcamSeiFile(file.path).catch(() => [] as DashcamSample[])))
     : files.map(() => [] as DashcamSample[])
-  const args = ['-y']
-  files.forEach(file => args.push('-i', file.path))
-  const graphs: string[] = []
-  files.forEach((file, index) => {
-    const chain = chainFilters(file, samples[index], options)
-    const useWheel = options.dashboard && samples[index].length > 0
-    if (useWheel) {
-      const dur = Math.max(1, Math.ceil(samples[index][samples[index].length - 1].time + 1))
-      args.push('-f', 'lavfi', '-i', `color=c=0x00000000:s=48x48:r=30:d=${dur},format=rgba`)
-      const wheelIndex = files.length + graphs.filter(item => item.includes('rotate=')).length
-      graphs.push(`[${wheelIndex}:v]drawtext=text='O':fontsize=34:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2,rotate=a='${angleExpr(runsOf(samples[index]))}':ow=48:oh=48:c=none[wheel${index}]`)
+  const sizes = await Promise.all(files.map(async file => {
+    let log = ''
+    const probe = Command.sidecar('binaries/ffmpeg', ['-hide_banner', '-i', ffmpegPath(file.path)])
+    probe.stderr.on('data', line => { log += lineText(line) })
+    await new Promise<void>(resolve => {
+      probe.on('close', () => resolve())
+      probe.on('error', () => resolve())
+      probe.spawn().catch(() => resolve())
+    })
+    return parseVideoSize(log)
+  }))
+  const assets: Record<string, string> = {}
+  if (options.dashboard && samples.some(list => list.length > 0)) {
+    for (const name of overlayAssetNames) {
+      if (!samples.some(list => list.length)) break
+      assets[name] = ffmpegPath(await resolveResource(`overlay/${name}.png`))
     }
-    const drawn = chain.length ? chain.join(',') : 'null'
-    if (useWheel) {
-      graphs.push(`[${index}:v]${drawn}[base${index}]`)
-      graphs.push(`[base${index}][wheel${index}]overlay=x=(main_w-overlay_w)/2+78:y=64:eof_action=pass[v${index}]`)
-    } else {
-      graphs.push(`[${index}:v]${drawn}[v${index}]`)
-    }
+  }
+  return buildFfmpegArgs({
+    files,
+    output: `${exportDir}/${fileName}`,
+    options,
+    samples,
+    sizes,
+    assets,
   })
-  graphs.push(`${files.map((_, index) => `[v${index}]`).join('')}concat=n=${files.length}:v=1:a=0[v]`)
-  args.push('-filter_complex', graphs.join(';'), '-map', '[v]', '-progress', '-', '-nostats', output)
-  return args
 }
+
+const lineText = (line: unknown) => typeof line === 'string' ? line : ''
 
 const doTask = async (
   files: ExportFile[],
@@ -215,54 +135,45 @@ const doTask = async (
 ) => {
   const fileName = outputName(files)
   const filePath = `${exportDir}/${fileName}`
-  const command = Command.sidecar(
-    'binaries/ffmpeg',
-    await exportArgs(files, exportDir, fileName, options),
-  )
-  command.on('close', () => {
+  let failure = ''
+  const report = (status: number, text: string) => {
     log({
       name: fileName,
       path: filePath,
       exportDir,
-      status: ExportStatusEnum.导出成功,
-      log: 'success',
+      status,
+      log: text,
     })
-  })
-  command.on('error', error => {
-    log({
-      name: fileName,
-      path: filePath,
-      exportDir,
-      status: ExportStatusEnum.导出失败,
-      log: error,
+  }
+  try {
+    const command = Command.sidecar(
+      'binaries/ffmpeg',
+      await exportArgs(files, exportDir, fileName, options),
+    )
+    command.on('close', payload => {
+      const ok = payload.code === 0
+      report(ok ? ExportStatusEnum.导出成功 : ExportStatusEnum.导出失败, ok ? 'success' : (failure || `exit ${payload.code}`))
     })
-  })
-  command.stdout.on('data', line => {
-    log({
-      name: fileName,
-      path: filePath,
-      exportDir,
-      status: ExportStatusEnum.进行中,
-      log: line,
+    command.on('error', error => {
+      failure = error
+      report(ExportStatusEnum.导出失败, error)
     })
-  })
-  command.stderr.on('data', line => {
-    log({
-      name: fileName,
-      path: filePath,
-      exportDir,
-      status: ExportStatusEnum.进行中,
-      log: line,
+    command.stdout.on('data', line => {
+      report(ExportStatusEnum.进行中, lineText(line))
     })
-  })
-  const child = await command.spawn()
-  log({
-    name: fileName,
-    path: filePath,
-    exportDir,
-    status: ExportStatusEnum.进行中,
-    log: `pid: ${child.pid}`,
-  })
+    command.stderr.on('data', line => {
+      const text = lineText(line)
+      if (/error|invalid|failed|cannot|no such/i.test(text)) failure = text.trim()
+      report(ExportStatusEnum.进行中, text)
+    })
+    const child = await command.spawn()
+    report(ExportStatusEnum.进行中, `pid: ${child.pid}`)
+    return true
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error)
+    report(ExportStatusEnum.导出失败, text)
+    return false
+  }
 }
 
 const FfmpegExport: React.FC<FfmpegExportProps> = (props) => {
@@ -274,6 +185,8 @@ const FfmpegExport: React.FC<FfmpegExportProps> = (props) => {
   const [withTimestamp, setWithTimestamp] = useState(true)
   const [withDashboard, setWithDashboard] = useState(false)
   const toasterId = useId('toaster')
+  const timestampId = useId('export-timestamp')
+  const dashboardId = useId('export-dashboard')
   const { dispatchToast } = useToastController(toasterId)
   const styles = useStyles()
   const selectExportDir = async () => {
@@ -335,11 +248,15 @@ const FfmpegExport: React.FC<FfmpegExportProps> = (props) => {
       return
     }
     setDialogIsOpen(false)
-    const afterNoticePermission = await isPermissionGranted()
-    if (!afterNoticePermission) {
-      requestPermission()
+    try {
+      const afterNoticePermission = await isPermissionGranted()
+      if (!afterNoticePermission) {
+        requestPermission()
+      }
+    } catch {
+      // Notification permission must not block the export.
     }
-    doTask(
+    const started = await doTask(
       files,
       exportDir,
       { timestamp: withTimestamp, dashboard: withDashboard },
@@ -364,26 +281,32 @@ const FfmpegExport: React.FC<FfmpegExportProps> = (props) => {
             progress = Math.max(0, +progressStr / 1000)
           }
         }
-        if (existsIndex > -1) {
+        const previous = existsIndex > -1 ? temp[existsIndex] : undefined
+        const keepStatus = !!previous && previous.status !== ExportStatusEnum.进行中 && status === ExportStatusEnum.进行中
+        const nextStatus = keepStatus && previous ? previous.status : status
+        if (previous) {
           temp.splice(existsIndex, 1, {
-            ...temp[existsIndex],
-            status,
-            duration: duration ?? temp[existsIndex].duration,
-            progress: progress ?? temp[existsIndex].progress,
-            log: [...temp[existsIndex].log, log],
+            ...previous,
+            status: nextStatus,
+            duration: duration ?? previous.duration,
+            progress: progress ?? previous.progress,
+            log: [...previous.log, log],
           })
         } else {
           temp.push({
             name,
             path: filePath,
             exportDir,
-            status,
+            status: nextStatus,
             duration: duration ?? 1,
             progress: 0,
             log: [log],
           })
         }
-        if (status === ExportStatusEnum.导出成功) {
+        tempTasks.current = temp
+        setTasks(temp)
+        if (keepStatus) return
+        if (nextStatus === ExportStatusEnum.导出成功) {
           dispatchToast(
             <Toast>
               <ToastTitle>
@@ -405,14 +328,14 @@ const FfmpegExport: React.FC<FfmpegExportProps> = (props) => {
             })
           }
         }
-        if (status === ExportStatusEnum.导出失败) {
+        if (nextStatus === ExportStatusEnum.导出失败) {
           dispatchToast(
             <Toast>
               <ToastTitle>
                 提示
               </ToastTitle>
               <ToastBody>
-                {exportDir} 导出失败
+                {exportDir} 导出失败 {lineLog.slice(0, 180)}
               </ToastBody>
             </Toast>,
             { intent: 'error' },
@@ -427,10 +350,9 @@ const FfmpegExport: React.FC<FfmpegExportProps> = (props) => {
             })
           }
         }
-        tempTasks.current = temp
-        setTasks(temp)
       },
     )
+    if (!started) return
     dispatchToast(
       <Toast>
         <ToastTitle>
@@ -486,11 +408,13 @@ const FfmpegExport: React.FC<FfmpegExportProps> = (props) => {
                     </Field>
                     <Field label="叠加">
                       <Checkbox
+                        id={timestampId}
                         checked={withTimestamp}
                         label="时间戳"
                         onChange={(_, data) => setWithTimestamp(!!data.checked)}
                       />
                       <Checkbox
+                        id={dashboardId}
                         checked={withDashboard}
                         label="仪表盘"
                         onChange={(_, data) => setWithDashboard(!!data.checked)}

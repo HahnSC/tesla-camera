@@ -35,7 +35,8 @@
       "signingIdentity": null
     },
     "resources": [
-      "icons/*"
+      "icons/*",
+      "overlay/*"
     ],
     "shortDescription": "",
     "linux": {
