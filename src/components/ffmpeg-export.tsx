@@ -28,8 +28,9 @@ import { loadDashcamSeiFile, type DashcamSample } from '../dashcam-sei'
 import { buildFfmpegArgs, overlayAssetNames, parseVideoSize } from '../export-overlay'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Command } from '@tauri-apps/plugin-shell'
+import { mkdir, remove, writeTextFile } from '@tauri-apps/plugin-fs'
 import { getName } from '@tauri-apps/api/app'
-import { resolveResource } from '@tauri-apps/api/path'
+import { appLocalDataDir, resolveResource } from '@tauri-apps/api/path'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import ExportTask from './export-task'
 import { durationToMs } from '../tool'
@@ -121,6 +122,19 @@ const exportArgs = async (
 
 const lineText = (line: unknown) => typeof line === 'string' ? line : ''
 
+// Windows CreateProcess stops at 32767 characters. One dashboard graph is already past that.
+const placeFilterScript = async (args: string[]) => {
+  const index = args.indexOf('-filter_complex')
+  if (index < 0) return { args, script: '' }
+  const dir = (await appLocalDataDir()).replace(/[\\/]+$/, '')
+  await mkdir(dir, { recursive: true })
+  const script = `${dir}/tesla-export-${Date.now()}.txt`
+  await writeTextFile(script, args[index + 1])
+  const next = args.slice()
+  next.splice(index, 2, '-filter_complex_script', ffmpegPath(script))
+  return { args: next, script }
+}
+
 const doTask = async (
   files: ExportFile[],
   exportDir: string,
@@ -145,12 +159,19 @@ const doTask = async (
       log: text,
     })
   }
+  let script = ''
+  const dropScript = () => {
+    if (!script) return
+    const path = script
+    script = ''
+    remove(path).catch(() => {})
+  }
   try {
-    const command = Command.sidecar(
-      'binaries/ffmpeg',
-      await exportArgs(files, exportDir, fileName, options),
-    )
+    const placed = await placeFilterScript(await exportArgs(files, exportDir, fileName, options))
+    script = placed.script
+    const command = Command.sidecar('binaries/ffmpeg', placed.args)
     command.on('close', payload => {
+      dropScript()
       const ok = payload.code === 0
       report(ok ? ExportStatusEnum.导出成功 : ExportStatusEnum.导出失败, ok ? 'success' : (failure || `exit ${payload.code}`))
     })
@@ -170,6 +191,7 @@ const doTask = async (
     report(ExportStatusEnum.进行中, `pid: ${child.pid}`)
     return true
   } catch (error) {
+    dropScript()
     const text = error instanceof Error ? error.message : String(error)
     report(ExportStatusEnum.导出失败, text)
     return false

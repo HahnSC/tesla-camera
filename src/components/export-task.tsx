@@ -99,7 +99,10 @@ const ExportTask: React.FC<ExportTaskProps> = (props) => {
             <DialogTitle>任务列表</DialogTitle>
             <DialogContent>
               {
-                props.tasks?.map(item => (
+                props.tasks?.map(item => {
+                  const lastLog = [...item.log].reverse().map(line => line.trim()).find(Boolean) ?? ''
+                  const failed = item.status === ExportStatusEnum.导出失败
+                  return (
                   <div
                     className={styles.task}
                     key={item.path}
@@ -113,7 +116,9 @@ const ExportTask: React.FC<ExportTaskProps> = (props) => {
                         validationMessage={
                           item.status === ExportStatusEnum.进行中
                             ? `正在导出，请等待 ${Math.floor((100 * item.progress) / item.duration)}%`
-                            : ExportStatusEnum[item.status] ?? ''
+                            : failed
+                              ? `${ExportStatusEnum[item.status]} ${lastLog.slice(0, 180)}`
+                              : ExportStatusEnum[item.status] ?? ''
                         }
                         validationState="none"
                       >
@@ -126,7 +131,8 @@ const ExportTask: React.FC<ExportTaskProps> = (props) => {
                       </Field>
                     </div>
                   </div>
-                ))
+                  )
+                })
               }
             </DialogContent>
             <DialogActions>

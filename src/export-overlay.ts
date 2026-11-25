@@ -143,9 +143,10 @@ export const buildFfmpegArgs = (input: {
   assets: Record<string, string>
 }) => {
   const output = ffmpegPath(input.output)
+  const title = (output.split('/').pop() ?? '').replace(/\.mp4$/i, '')
   const { files, options, samples, assets, sizes } = input
   if (!options.timestamp && !options.dashboard) {
-    if (files.length === 1) return ['-y', '-i', ffmpegPath(files[0].path), '-c', 'copy', output]
+    if (files.length === 1) return ['-y', '-i', ffmpegPath(files[0].path), '-c', 'copy', '-metadata', `title=${title}`, output]
   }
   const args = ['-y']
   files.forEach(file => args.push('-i', ffmpegPath(file.path)))
@@ -279,7 +280,7 @@ export const buildFfmpegArgs = (input: {
     if (rightOn) over(stamp(blinkROn[slot], `brof${index}`, 22, 18), `vbro${index}`, rightX, n(30), `enable='${flash}*(${rightOn})'`)
     return label
   })
-  graphs.push(`${labels.map(label => `[${label}]`).join('')}concat=n=${files.length}:v=1:a=0[v]`)
-  args.push('-filter_complex', graphs.join(';'), '-map', '[v]', '-progress', '-', '-nostats', output)
+  graphs.push(`${labels.map(label => `[${label}]`).join('')}concat=n=${files.length}:v=1:a=0,format=yuv420p[v]`)
+  args.push('-filter_complex', graphs.join(';'), '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-movflags', '+faststart', '-metadata', `title=${title}`, '-progress', '-', '-nostats', output)
   return args
 }
